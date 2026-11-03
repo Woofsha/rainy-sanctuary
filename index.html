@@ -1,0 +1,1800 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Moss & Rain Grove</title>
+  <!-- Tailwind CDN for GitHub Pages deployment -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      background-color: #0b0f17 !important;
+      color: #d1d9e6 !important;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    .rain-scene-container {
+      content-visibility: auto;
+      contain-intrinsic-size: auto none auto 480px;
+    }
+    canvas {
+      image-rendering: auto;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+  </style>
+</head>
+<body class="bg-[#0b0f17] text-[#d1d9e6] antialiased p-2 sm:p-4 min-h-screen flex items-center justify-center">
+  <div class="rain-scene-container w-full bg-[#131924] border border-[#222c3e] rounded-2xl p-3 sm:p-4 shadow-2xl max-w-4xl mx-auto flex flex-col gap-3">
+    
+    <!-- Header / Controls -->
+    <div class="flex flex-wrap items-center justify-between gap-2 px-1">
+      <div class="flex items-center gap-2">
+        <span class="inline-block w-2.5 h-2.5 rounded-full bg-cyan-500 animate-pulse"></span>
+        <h1 class="text-base sm:text-lg font-semibold tracking-wide text-[#e2e8f0]">
+          Moss & Rain Grove
+        </h1>
+      </div>
+
+      <div class="flex items-center flex-wrap gap-2 text-xs">
+        <!-- Rain Sound Toggle -->
+        <button id="btn-sound" class="px-3 py-1.5 rounded-lg border border-[#2b374c] bg-[#1a2332] hover:bg-[#232e42] transition-colors font-medium flex items-center gap-1.5 text-[#e2e8f0]">
+          <span id="icon-sound">🌧️</span>
+          <span>Rain Sound: <span id="label-sound" class="text-rose-400 font-semibold">Off</span></span>
+        </button>
+
+        <!-- Pace Toggle (1.0x -> 0.5x -> 0.35x) -->
+        <button id="btn-pace" class="px-3 py-1.5 rounded-lg border border-[#2b374c] bg-[#1a2332] hover:bg-[#232e42] transition-colors font-medium text-[#e2e8f0]">
+          Pace: <span id="label-pace" class="text-emerald-400 font-semibold">0.5x Cozy</span>
+        </button>
+
+        <!-- Weather toggle -->
+        <button id="btn-intensity" class="px-3 py-1.5 rounded-lg border border-[#2b374c] bg-[#1a2332] hover:bg-[#232e42] transition-colors font-medium text-[#e2e8f0]">
+          Rain: <span id="label-intensity" class="text-cyan-400 font-semibold">Steady</span>
+        </button>
+
+        <!-- Time toggle -->
+        <button id="btn-time" class="px-3 py-1.5 rounded-lg border border-[#2b374c] bg-[#1a2332] hover:bg-[#232e42] transition-colors font-medium text-[#e2e8f0]">
+          Atmosphere: <span id="label-time" class="text-amber-400 font-semibold">Overcast</span>
+        </button>
+
+        <!-- Play/pause -->
+        <button id="btn-pause" class="px-3 py-1.5 rounded-lg border border-[#2b374c] bg-[#1a2332] hover:bg-[#232e42] transition-colors text-[#cbd5e1]">
+          <span id="label-pause">Pause</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Main Canvas Frame -->
+    <div class="relative w-full overflow-hidden rounded-xl border border-[#222c3e] bg-[#161c26] shadow-inner">
+      <canvas id="stage" width="800" height="460" class="w-full h-auto block cursor-pointer"></canvas>
+    </div>
+
+  </div>
+
+  <script>
+    (function () {
+      const canvas = document.getElementById('stage');
+      const ctx = canvas.getContext('2d');
+      const container = document.querySelector('.rain-scene-container');
+
+      // --- PROCEDURAL TEXTURES (SURFACE BREAKUP) ---
+      const grainPatternCanvas = document.createElement('canvas');
+      grainPatternCanvas.width = 64;
+      grainPatternCanvas.height = 64;
+      const gctx = grainPatternCanvas.getContext('2d');
+
+      const barkPatternCanvas = document.createElement('canvas');
+      barkPatternCanvas.width = 48;
+      barkPatternCanvas.height = 48;
+      const bctx = barkPatternCanvas.getContext('2d');
+
+      const stonePatternCanvas = document.createElement('canvas');
+      stonePatternCanvas.width = 64;
+      stonePatternCanvas.height = 64;
+      const sctx = stonePatternCanvas.getContext('2d');
+
+      // 1. Organic dither grain pattern
+      const gImg = gctx.createImageData(64, 64);
+      for (let i = 0; i < gImg.data.length; i += 4) {
+        const x = (i / 4) % 64;
+        const y = Math.floor((i / 4) / 64);
+        const bayer = ((x & 3) ^ ((y & 3) * 2)) * 12;
+        const noise = (Math.sin(x * 0.4) * Math.cos(y * 0.4) * 0.5 + 0.5) * 35;
+        const val = 128 + (bayer + noise - 30);
+        gImg.data[i] = val;
+        gImg.data[i + 1] = val;
+        gImg.data[i + 2] = val;
+        gImg.data[i + 3] = 34;
+      }
+      gctx.putImageData(gImg, 0, 0);
+      const grainPattern = ctx.createPattern(grainPatternCanvas, 'repeat');
+
+      // 2. Striated wood bark pattern
+      bctx.fillStyle = '#4a3832';
+      bctx.fillRect(0, 0, 48, 48);
+      for (let x = 0; x < 48; x += 3) {
+        bctx.strokeStyle = (x % 6 === 0) ? '#2c1e26' : '#685045';
+        bctx.lineWidth = 1;
+        bctx.beginPath();
+        bctx.moveTo(x + Math.sin(x) * 2, 0);
+        bctx.bezierCurveTo(x + 3, 16, x - 3, 32, x + 1, 48);
+        bctx.stroke();
+      }
+      bctx.fillStyle = '#221820';
+      bctx.beginPath();
+      bctx.ellipse(24, 20, 3, 6, 0.2, 0, Math.PI * 2);
+      bctx.fill();
+      const barkPattern = ctx.createPattern(barkPatternCanvas, 'repeat');
+
+      // 3. Stone fissure & cluster dither pattern
+      sctx.fillStyle = '#566472';
+      sctx.fillRect(0, 0, 64, 64);
+      for (let y = 0; y < 64; y += 4) {
+        for (let x = 0; x < 64; x += 4) {
+          if ((x * 7 + y * 13) % 5 === 0) {
+            sctx.fillStyle = '#39424c';
+            sctx.fillRect(x, y, 2, 2);
+          } else if ((x * 11 + y * 3) % 7 === 0) {
+            sctx.fillStyle = '#7a8c9e';
+            sctx.fillRect(x + 1, y + 1, 1, 1);
+          }
+        }
+      }
+      sctx.strokeStyle = '#282f37';
+      sctx.lineWidth = 1;
+      sctx.beginPath();
+      sctx.moveTo(8, 0);
+      sctx.lineTo(18, 22);
+      sctx.lineTo(14, 45);
+      sctx.lineTo(26, 64);
+      sctx.stroke();
+      const stonePattern = ctx.createPattern(stonePatternCanvas, 'repeat');
+
+      // --- UNIVERSAL SPATIAL & COLLISION REGISTRY ---
+      const collisionRegistry = [];
+
+      function registerObstacle(obstacle) {
+        collisionRegistry.push(obstacle);
+      }
+
+      const worldBounds = {
+        minX: 35,
+        maxX: 765,
+        minY: 330,
+        maxY: 438
+      };
+
+      registerObstacle({
+        id: 'ancient_tree_base',
+        x: 80,
+        y: 415,
+        rx: 32,
+        ry: 14,
+        blocksWalkers: true
+      });
+
+      registerObstacle({
+        id: 'slender_tree_base',
+        x: 715,
+        y: 405,
+        rx: 20,
+        ry: 10,
+        blocksWalkers: true
+      });
+
+      registerObstacle({
+        id: 'boulder_1',
+        x: 235,
+        y: 380,
+        rx: 24,
+        ry: 11,
+        blocksWalkers: true
+      });
+
+      registerObstacle({
+        id: 'boulder_2',
+        x: 375,
+        y: 415,
+        rx: 20,
+        ry: 10,
+        blocksWalkers: true
+      });
+
+      registerObstacle({
+        id: 'pond_water',
+        x: 515,
+        y: 372,
+        rx: 105,
+        ry: 34,
+        blocksWalkers: true,
+        allowsSwimmers: true
+      });
+
+      function isWalkable(targetX, targetY, bodyRadius, actor) {
+        if (targetX - bodyRadius < worldBounds.minX || targetX + bodyRadius > worldBounds.maxX) {
+          return false;
+        }
+        if (targetY - bodyRadius * 0.4 < worldBounds.minY || targetY + bodyRadius * 0.4 > worldBounds.maxY) {
+          return false;
+        }
+
+        if (actor.isSwimmer) {
+          const pond = collisionRegistry.find(o => o.id === 'pond_water');
+          const dx = (targetX - pond.x) / (pond.rx - bodyRadius);
+          const dy = (targetY - pond.y) / (pond.ry - bodyRadius * 0.6);
+          return (dx * dx + dy * dy) <= 1.0;
+        }
+
+        for (let i = 0; i < collisionRegistry.length; i++) {
+          const obs = collisionRegistry[i];
+          if (!obs.blocksWalkers) continue;
+
+          const effRx = obs.rx + bodyRadius;
+          const effRy = obs.ry + bodyRadius * 0.5;
+          const dx = (targetX - obs.x) / effRx;
+          const dy = (targetY - obs.y) / effRy;
+
+          if (dx * dx + dy * dy < 1.0) {
+            return false;
+          }
+        }
+
+        return true;
+      }
+
+      function attemptMove(actor, desiredVx, desiredVy) {
+        const r = actor.footprintRadius;
+
+        if (isWalkable(actor.x + desiredVx, actor.y + desiredVy, r, actor)) {
+          actor.x += desiredVx;
+          actor.y += desiredVy;
+          return { moved: true, slid: false };
+        }
+
+        if (Math.abs(desiredVx) > 0.001 && isWalkable(actor.x + desiredVx, actor.y, r, actor)) {
+          actor.x += desiredVx;
+          return { moved: true, slid: true };
+        }
+
+        if (Math.abs(desiredVy) > 0.001 && isWalkable(actor.x, actor.y + desiredVy, r, actor)) {
+          actor.y += desiredVy;
+          return { moved: true, slid: true };
+        }
+
+        return { moved: false, slid: false };
+      }
+
+      // --- STATE & SETTINGS ---
+      let isPaused = false;
+      let rainIntensityMode = 1;
+      const rainCounts = [75, 170, 320];
+      let timeMode = 0;
+      let lastTime = performance.now();
+      let animId = null;
+
+      const paceSettings = [
+        { label: '1.0x Pace', mult: 1.0 },
+        { label: '0.5x Cozy', mult: 0.5 },
+        { label: '0.35x Gentle', mult: 0.35 }
+      ];
+      let paceIndex = 1;
+      let speedMult = paceSettings[paceIndex].mult;
+
+      const themes = [
+        {
+          name: 'Overcast Day',
+          skyTop: '#425164',
+          skyBottom: '#718398',
+          mistColor: 'rgba(172, 191, 207, 0.18)',
+          ambientShadow: 'rgba(28, 36, 54, 0.65)',
+          keyLightColor: 'rgba(224, 236, 228, 0.38)',
+          grassCrevice: '#1b2c2b',
+          grassBase: '#436147',
+          grassHighlight: '#9cb58e',
+          puddleBase: '#394757',
+          puddleReflect: '#7b8e9f',
+          lanternGlow: 'rgba(235, 172, 85, 0.22)'
+        },
+        {
+          name: 'Lantern Twilight',
+          skyTop: '#1e2535',
+          skyBottom: '#363f53',
+          mistColor: 'rgba(102, 116, 142, 0.16)',
+          ambientShadow: 'rgba(16, 21, 33, 0.82)',
+          keyLightColor: 'rgba(235, 195, 138, 0.42)',
+          grassCrevice: '#121f20',
+          grassBase: '#2a3d31',
+          grassHighlight: '#688562',
+          puddleBase: '#202735',
+          puddleReflect: '#48556d',
+          lanternGlow: 'rgba(240, 175, 75, 0.48)'
+        }
+      ];
+
+      // --- AUTHENTIC RAIN AUDIO ENGINE (WEB AUDIO API) ---
+      let audioCtx = null;
+      let soundEnabled = false;
+      let masterRainGain = null;
+      let rainShowerSource = null;
+      let rainPatterSource = null;
+
+      function initAuthenticRainAudio() {
+        if (audioCtx) return;
+
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        audioCtx = new AudioContextClass();
+
+        masterRainGain = audioCtx.createGain();
+        masterRainGain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+        masterRainGain.connect(audioCtx.destination);
+
+        const sampleRate = audioCtx.sampleRate;
+        const bufferLength = sampleRate * 5;
+
+        // 1. Steady rain shower layer
+        const showerBuffer = audioCtx.createBuffer(2, bufferLength, sampleRate);
+        for (let ch = 0; ch < 2; ch++) {
+          const data = showerBuffer.getChannelData(ch);
+          let b0 = 0, b1 = 0, b2 = 0;
+          for (let i = 0; i < bufferLength; i++) {
+            const white = Math.random() * 2 - 1;
+            b0 = 0.997 * b0 + white * 0.055;
+            b1 = 0.985 * b1 + white * 0.085;
+            b2 = 0.950 * b2 + white * 0.14;
+            data[i] = (b0 + b1 + b2) * 0.28 + white * 0.035;
+          }
+        }
+
+        rainShowerSource = audioCtx.createBufferSource();
+        rainShowerSource.buffer = showerBuffer;
+        rainShowerSource.loop = true;
+
+        const showerHighpass = audioCtx.createBiquadFilter();
+        showerHighpass.type = 'highpass';
+        showerHighpass.frequency.setValueAtTime(420, audioCtx.currentTime);
+
+        const showerPeaking = audioCtx.createBiquadFilter();
+        showerPeaking.type = 'peaking';
+        showerPeaking.frequency.setValueAtTime(3200, audioCtx.currentTime);
+        showerPeaking.Q.setValueAtTime(1.1, audioCtx.currentTime);
+        showerPeaking.gain.setValueAtTime(5.0, audioCtx.currentTime);
+
+        const showerLowpass = audioCtx.createBiquadFilter();
+        showerLowpass.type = 'lowpass';
+        showerLowpass.frequency.setValueAtTime(8500, audioCtx.currentTime);
+
+        rainShowerSource.connect(showerHighpass);
+        showerHighpass.connect(showerPeaking);
+        showerPeaking.connect(showerLowpass);
+        showerLowpass.connect(masterRainGain);
+        rainShowerSource.start();
+
+        // 2. Droplet splatter & patter layer
+        const patterBuffer = audioCtx.createBuffer(2, bufferLength, sampleRate);
+        for (let ch = 0; ch < 2; ch++) {
+          const pdata = patterBuffer.getChannelData(ch);
+          for (let i = 0; i < bufferLength; i++) {
+            pdata[i] = 0;
+            if (Math.random() < 0.035) {
+              const amp = (Math.random() * 2 - 1) * Math.pow(Math.random(), 2.2) * 1.6;
+              pdata[i] = amp;
+              if (i + 1 < bufferLength) pdata[i + 1] = -amp * 0.65;
+              if (i + 2 < bufferLength) pdata[i + 2] = amp * 0.25;
+            }
+          }
+        }
+
+        rainPatterSource = audioCtx.createBufferSource();
+        rainPatterSource.buffer = patterBuffer;
+        rainPatterSource.loop = true;
+
+        const patterBandpass = audioCtx.createBiquadFilter();
+        patterBandpass.type = 'bandpass';
+        patterBandpass.frequency.setValueAtTime(2400, audioCtx.currentTime);
+        patterBandpass.Q.setValueAtTime(1.5, audioCtx.currentTime);
+
+        const patterGain = audioCtx.createGain();
+        patterGain.gain.setValueAtTime(0.75, audioCtx.currentTime);
+
+        rainPatterSource.connect(patterBandpass);
+        patterBandpass.connect(patterGain);
+        patterGain.connect(masterRainGain);
+        rainPatterSource.start();
+      }
+
+      function toggleSound() {
+        if (!audioCtx) {
+          initAuthenticRainAudio();
+        }
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume();
+        }
+
+        soundEnabled = !soundEnabled;
+        const labelSound = document.getElementById('label-sound');
+        const iconSound = document.getElementById('icon-sound');
+
+        if (soundEnabled) {
+          masterRainGain.gain.setTargetAtTime(0.48, audioCtx.currentTime, 0.3);
+          labelSound.textContent = 'Cozy Rain';
+          labelSound.className = 'text-emerald-400 font-semibold';
+          iconSound.textContent = '🌧️✨';
+        } else {
+          masterRainGain.gain.setTargetAtTime(0.0001, audioCtx.currentTime, 0.2);
+          labelSound.textContent = 'Off';
+          labelSound.className = 'text-rose-400 font-semibold';
+          iconSound.textContent = '🌧️';
+        }
+      }
+
+      // --- PARTICLES & WEATHER ---
+      const rainDrops = [];
+      const splashes = [];
+      const ripples = [];
+      const floatingLeaves = [];
+
+      function initRain() {
+        rainDrops.length = 0;
+        const count = rainCounts[rainIntensityMode];
+        for (let i = 0; i < count; i++) {
+          rainDrops.push({
+            x: Math.random() * 860 - 30,
+            y: Math.random() * 460 - 50,
+            len: 11 + Math.random() * 14,
+            baseSpeed: 6.5 + Math.random() * 3.5,
+            thickness: 0.8 + Math.random() * 0.9,
+            slant: -1.4 + Math.random() * 0.4,
+            layer: Math.random()
+          });
+        }
+      }
+
+      function addSplash(x, y, count = 3, force = 1.8) {
+        for (let i = 0; i < count; i++) {
+          const angle = -Math.PI * 0.85 + Math.random() * Math.PI * 0.7;
+          const spd = (0.5 + Math.random() * 1.2) * force * speedMult;
+          splashes.push({
+            x,
+            y,
+            vx: Math.cos(angle) * spd,
+            vy: Math.sin(angle) * spd,
+            radius: 1 + Math.random() * 1.3,
+            life: 1.0,
+            decay: (0.02 + Math.random() * 0.03) * (0.6 + speedMult * 0.8)
+          });
+        }
+        ripples.push({
+          x,
+          y,
+          r: 2,
+          maxR: 12 + Math.random() * 14,
+          alpha: 0.75,
+          speed: (0.35 + Math.random() * 0.25) * speedMult
+        });
+      }
+
+      for (let i = 0; i < 4; i++) {
+        floatingLeaves.push({
+          x: 440 + Math.random() * 130,
+          y: 350 + Math.random() * 40,
+          rot: Math.random() * Math.PI * 2,
+          size: 6 + Math.random() * 4,
+          phase: Math.random() * Math.PI * 2
+        });
+      }
+
+      function drawMultiPassShape(ctx, pathFn, options) {
+        const {
+          shadowOffset = { x: 3, y: 4 },
+          shadowColor = themes[timeMode].ambientShadow,
+          fillColor = '#475b4c',
+          pattern = grainPattern,
+          bevelStroke = themes[timeMode].keyLightColor,
+          bevelWidth = 1.5,
+          creviceStroke = '#1c2436',
+          creviceWidth = 1.0
+        } = options;
+
+        ctx.save();
+
+        ctx.save();
+        ctx.translate(shadowOffset.x, shadowOffset.y);
+        ctx.fillStyle = shadowColor;
+        ctx.beginPath();
+        pathFn(ctx);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.save();
+        ctx.beginPath();
+        pathFn(ctx);
+        ctx.fillStyle = fillColor;
+        ctx.fill();
+
+        if (pattern) {
+          ctx.globalCompositeOperation = 'source-atop';
+          ctx.fillStyle = pattern;
+          ctx.fill();
+        }
+
+        if (creviceStroke) {
+          ctx.globalCompositeOperation = 'source-atop';
+          ctx.strokeStyle = creviceStroke;
+          ctx.lineWidth = creviceWidth;
+          ctx.stroke();
+        }
+        ctx.restore();
+
+        if (bevelStroke) {
+          ctx.save();
+          ctx.beginPath();
+          pathFn(ctx);
+          ctx.strokeStyle = bevelStroke;
+          ctx.lineWidth = bevelWidth;
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        ctx.restore();
+      }
+
+      const ancientTreeProp = {
+        id: 'ancient_tree_base',
+        x: 80,
+        y: 415,
+        render(ctx, t) {
+          const theme = themes[timeMode];
+          const effectiveTime = t * speedMult;
+          const gust = Math.sin(effectiveTime * 0.0004) * 0.025 + Math.sin(effectiveTime * 0.0011) * 0.012;
+          const sway = Math.sin(effectiveTime * 0.0008) * 0.02 + gust;
+
+          ctx.save();
+          ctx.translate(this.x, this.y);
+
+          drawMultiPassShape(ctx, (c) => {
+            c.moveTo(-24, 0);
+            c.bezierCurveTo(-32, -80, -18 + sway * 120, -180, -12 + sway * 200, -260);
+            c.lineTo(18 + sway * 200, -260);
+            c.bezierCurveTo(24 + sway * 120, -170, 36, -70, 38, 0);
+            c.closePath();
+          }, {
+            shadowOffset: { x: 5, y: 6 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#4d3932',
+            pattern: barkPattern,
+            bevelStroke: 'rgba(180, 158, 142, 0.4)',
+            bevelWidth: 2.0,
+            creviceStroke: '#261b1e'
+          });
+
+          ctx.save();
+          ctx.strokeStyle = '#2d1e21';
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(-10, -40);
+          ctx.bezierCurveTo(-14, -90, -4 + sway * 60, -150, -2 + sway * 100, -220);
+          ctx.moveTo(12, -25);
+          ctx.bezierCurveTo(8, -85, 14 + sway * 60, -145, 10 + sway * 100, -210);
+          ctx.stroke();
+          ctx.restore();
+
+          drawMultiPassShape(ctx, (c) => {
+            const bx = -14 + sway * 140;
+            const by = -200;
+            c.moveTo(bx, by);
+            c.bezierCurveTo(bx - 40, by - 25, bx - 90, by - 40, bx - 130 + sway * 80, by - 65);
+            c.lineTo(bx - 125 + sway * 80, by - 55);
+            c.bezierCurveTo(bx - 85, by - 30, bx - 35, by - 10, bx, by + 12);
+            c.closePath();
+          }, {
+            shadowOffset: { x: 3, y: 4 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#43312c',
+            pattern: barkPattern,
+            bevelStroke: 'rgba(165, 142, 126, 0.35)',
+            bevelWidth: 1.5,
+            creviceStroke: '#20161a'
+          });
+
+          const lanternX = -100 + sway * 180;
+          const lanternY = -230;
+          const lanternSwing = Math.sin(t * 0.0014 * speedMult) * 0.09;
+
+          ctx.save();
+          ctx.translate(lanternX, lanternY);
+          ctx.rotate(lanternSwing);
+
+          ctx.strokeStyle = '#292224';
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(0, 24);
+          ctx.stroke();
+
+          drawMultiPassShape(ctx, (c) => {
+            c.moveTo(-10, 24);
+            c.lineTo(10, 24);
+            c.lineTo(7, 28);
+            c.lineTo(-7, 28);
+            c.closePath();
+          }, {
+            shadowOffset: { x: 1, y: 2 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#362f33',
+            pattern: stonePattern,
+            bevelStroke: '#948777'
+          });
+
+          const glowGrad = ctx.createRadialGradient(0, 36, 2, 0, 36, 48);
+          glowGrad.addColorStop(0, '#fbe09e');
+          glowGrad.addColorStop(0.3, theme.lanternGlow);
+          glowGrad.addColorStop(1, 'rgba(235, 168, 70, 0)');
+          ctx.fillStyle = glowGrad;
+          ctx.beginPath();
+          ctx.arc(0, 36, 42, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.fillStyle = '#e8b868';
+          ctx.fillRect(-6, 28, 12, 15);
+
+          ctx.strokeStyle = '#221a1d';
+          ctx.lineWidth = 1.0;
+          ctx.strokeRect(-6, 28, 12, 15);
+          ctx.beginPath();
+          ctx.moveTo(0, 28);
+          ctx.lineTo(0, 43);
+          ctx.stroke();
+
+          if (Math.sin(t * 0.004 * speedMult) > 0.96) {
+            addSplash(this.x + lanternX, this.y + lanternY + 45, 1, 0.7);
+          }
+          ctx.restore();
+
+          const clusters = [
+            { x: -110 + sway * 190, y: -275, r: 48 },
+            { x: -50 + sway * 210, y: -315, r: 62 },
+            { x: 25 + sway * 220, y: -295, r: 56 },
+            { x: -20 + sway * 240, y: -350, r: 52 },
+            { x: 75 + sway * 200, y: -250, r: 44 }
+          ];
+
+          clusters.forEach((cl, idx) => {
+            const puffSwayX = Math.sin(t * 0.0011 * speedMult + idx) * 3;
+            const puffSwayY = Math.cos(t * 0.0011 * speedMult + idx) * 2;
+
+            drawMultiPassShape(ctx, (c) => {
+              c.arc(cl.x + puffSwayX, cl.y + puffSwayY, cl.r, 0, Math.PI * 2);
+            }, {
+              shadowOffset: { x: 3, y: 6 },
+              shadowColor: theme.ambientShadow,
+              fillColor: (idx % 2 === 0) ? '#37573f' : '#2b4733',
+              pattern: grainPattern,
+              bevelStroke: theme.grassHighlight,
+              bevelWidth: 2.2,
+              creviceStroke: '#142724'
+            });
+
+            ctx.save();
+            ctx.fillStyle = '#648b61';
+            for (let a = 0; a < 6; a++) {
+              const angle = a * (Math.PI / 3);
+              const sx = cl.x + puffSwayX + Math.cos(angle) * (cl.r * 0.55);
+              const sy = cl.y + puffSwayY + Math.sin(angle) * (cl.r * 0.55);
+              ctx.beginPath();
+              ctx.ellipse(sx, sy, 5, 3, angle, 0, Math.PI * 2);
+              ctx.fill();
+            }
+            ctx.restore();
+          });
+
+          ctx.restore();
+        }
+      };
+
+      const slenderTreeProp = {
+        id: 'slender_tree_base',
+        x: 715,
+        y: 405,
+        render(ctx, t) {
+          const theme = themes[timeMode];
+          const effectiveTime = t * speedMult;
+          const gust = Math.sin(effectiveTime * 0.0004) * 0.025;
+          const sway = Math.cos(effectiveTime * 0.0009) * 0.016 + gust * 0.8;
+
+          ctx.save();
+          ctx.translate(this.x, this.y);
+
+          drawMultiPassShape(ctx, (c) => {
+            c.moveTo(-16, 0);
+            c.bezierCurveTo(-14, -70, -10 + sway * 90, -160, -6 + sway * 170, -240);
+            c.lineTo(10 + sway * 170, -240);
+            c.bezierCurveTo(8 + sway * 90, -160, 16, -70, 18, 0);
+            c.closePath();
+          }, {
+            shadowOffset: { x: 3, y: 5 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#53433c',
+            pattern: barkPattern,
+            bevelStroke: 'rgba(188, 168, 155, 0.4)',
+            bevelWidth: 1.5,
+            creviceStroke: '#251b1f'
+          });
+
+          const rightClusters = [
+            { x: -25 + sway * 170, y: -260, r: 42 },
+            { x: 10 + sway * 185, y: -290, r: 50 },
+            { x: 35 + sway * 175, y: -245, r: 38 }
+          ];
+
+          rightClusters.forEach((cl) => {
+            drawMultiPassShape(ctx, (c) => {
+              c.arc(cl.x, cl.y, cl.r, 0, Math.PI * 2);
+            }, {
+              shadowOffset: { x: 2, y: 4 },
+              shadowColor: theme.ambientShadow,
+              fillColor: '#3d5e46',
+              pattern: grainPattern,
+              bevelStroke: theme.grassHighlight,
+              bevelWidth: 1.8,
+              creviceStroke: '#192b23'
+            });
+          });
+
+          ctx.restore();
+        }
+      };
+
+      const boulder1Prop = {
+        id: 'boulder_1',
+        x: 235,
+        y: 380,
+        render(ctx) {
+          const theme = themes[timeMode];
+          ctx.save();
+          ctx.translate(this.x, this.y);
+          drawMultiPassShape(ctx, (c) => {
+            c.ellipse(0, 0, 24, 11, 0.05, 0, Math.PI * 2);
+          }, {
+            shadowOffset: { x: 2, y: 3 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#586471',
+            pattern: stonePattern,
+            bevelStroke: '#97aab9',
+            bevelWidth: 1.2,
+            creviceStroke: '#2a323c'
+          });
+          ctx.restore();
+        }
+      };
+
+      const boulder2Prop = {
+        id: 'boulder_2',
+        x: 375,
+        y: 415,
+        render(ctx) {
+          const theme = themes[timeMode];
+          ctx.save();
+          ctx.translate(this.x, this.y);
+          drawMultiPassShape(ctx, (c) => {
+            c.ellipse(0, 0, 20, 10, -0.05, 0, Math.PI * 2);
+          }, {
+            shadowOffset: { x: 2, y: 3 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#52606d',
+            pattern: stonePattern,
+            bevelStroke: '#94a5b4',
+            bevelWidth: 1.2,
+            creviceStroke: '#272f38'
+          });
+          ctx.restore();
+        }
+      };
+
+      const catActor = {
+        id: 'cat',
+        x: 140,
+        y: 350,
+        footprintRadius: 10,
+        headingAngle: 0.1,
+        speed: 0.55,
+        turnTimer: 120,
+        walkCycle: 0,
+        bobPhase: 0,
+        facingRight: true,
+        update() {
+          this.turnTimer--;
+          if (this.turnTimer <= 0) {
+            this.turnTimer = 80 + Math.floor(Math.random() * 120);
+            this.headingAngle += (Math.random() - 0.5) * 0.8;
+          }
+
+          const vx = Math.cos(this.headingAngle) * this.speed * speedMult;
+          const vy = Math.sin(this.headingAngle) * (this.speed * 0.4) * speedMult;
+
+          const res = attemptMove(this, vx, vy);
+          if (!res.moved) {
+            this.headingAngle += Math.PI * 0.65;
+          } else {
+            this.walkCycle += 0.055 * speedMult;
+          }
+
+          if (Math.abs(vx) > 0.05) {
+            this.facingRight = (vx > 0);
+          }
+        },
+        render(ctx, t) {
+          const theme = themes[timeMode];
+          this.bobPhase = Math.sin(this.walkCycle * 2) * 1.5;
+
+          ctx.save();
+          ctx.translate(this.x, this.y + this.bobPhase);
+          if (!this.facingRight) ctx.scale(-1, 1);
+
+          ctx.save();
+          ctx.fillStyle = theme.ambientShadow;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 18, 5, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+
+          const tailWave = Math.sin(t * 0.0016 * speedMult) * 0.25;
+          drawMultiPassShape(ctx, (c) => {
+            c.moveTo(-16, -16);
+            c.bezierCurveTo(-28, -22, -34 + tailWave * 20, -38, -26 + tailWave * 30, -52);
+            c.bezierCurveTo(-22 + tailWave * 30, -52, -22, -36, -12, -14);
+            c.closePath();
+          }, {
+            shadowOffset: { x: 1, y: 2 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#965a3d',
+            pattern: grainPattern,
+            bevelStroke: '#e5ad8b',
+            bevelWidth: 1.2
+          });
+
+          const legSwing = Math.sin(this.walkCycle) * 7;
+          drawMultiPassShape(ctx, (c) => {
+            c.rect(-14, -10, 6, 10 + legSwing);
+            c.rect(-6, -10, 6, 10 - legSwing);
+          }, {
+            shadowOffset: { x: 1, y: 2 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#433c46',
+            pattern: grainPattern,
+            bevelStroke: '#8a7d91',
+            bevelWidth: 1.0
+          });
+
+          drawMultiPassShape(ctx, (c) => {
+            c.ellipse(0, -15, 18, 12, 0.05, 0, Math.PI * 2);
+          }, {
+            shadowOffset: { x: 2, y: 3 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#d6cfc5',
+            pattern: grainPattern,
+            bevelStroke: '#fbf7f1',
+            bevelWidth: 1.5,
+            creviceStroke: '#3a3442'
+          });
+
+          ctx.save();
+          ctx.fillStyle = '#9b5e3f';
+          ctx.beginPath();
+          ctx.arc(-4, -18, 8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#39333f';
+          ctx.beginPath();
+          ctx.arc(6, -14, 6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+
+          drawMultiPassShape(ctx, (c) => {
+            c.rect(6, -10, 6, 10 - legSwing);
+            c.rect(14, -10, 6, 10 + legSwing);
+          }, {
+            shadowOffset: { x: 1, y: 2 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#d6cfc5',
+            pattern: grainPattern,
+            bevelStroke: '#fbf7f1',
+            bevelWidth: 1.0
+          });
+
+          drawMultiPassShape(ctx, (c) => {
+            c.arc(16, -24, 11, 0, Math.PI * 2);
+          }, {
+            shadowOffset: { x: 2, y: 2 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#d6cfc5',
+            pattern: grainPattern,
+            bevelStroke: '#faf6f0',
+            bevelWidth: 1.4,
+            creviceStroke: '#38303e'
+          });
+
+          drawMultiPassShape(ctx, (c) => {
+            c.moveTo(10, -32);
+            c.lineTo(13, -40);
+            c.lineTo(18, -32);
+            c.moveTo(18, -32);
+            c.lineTo(23, -40);
+            c.lineTo(26, -30);
+            c.closePath();
+          }, {
+            shadowOffset: { x: 1, y: 1 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#9b5e3f',
+            pattern: grainPattern,
+            bevelStroke: '#f3c1a3',
+            bevelWidth: 1.0
+          });
+
+          ctx.save();
+          ctx.strokeStyle = '#322b37';
+          ctx.lineWidth = 1.3;
+          ctx.beginPath();
+          ctx.arc(17, -24, 2.5, Math.PI * 1.1, Math.PI * 1.9);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(22, -24, 2.5, Math.PI * 1.1, Math.PI * 1.9);
+          ctx.stroke();
+          ctx.fillStyle = '#b77983';
+          ctx.beginPath();
+          ctx.ellipse(25, -21, 1.5, 1, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+
+          const umbrellaSway = Math.sin(t * 0.0018 * speedMult) * 0.05;
+          ctx.save();
+          ctx.translate(14, -18);
+          ctx.rotate(umbrellaSway);
+
+          ctx.strokeStyle = '#5d4734';
+          ctx.lineWidth = 2.0;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(-4, -36);
+          ctx.stroke();
+
+          drawMultiPassShape(ctx, (c) => {
+            c.moveTo(-4, -36);
+            c.bezierCurveTo(-28, -48, -32, -62, -4, -66);
+            c.bezierCurveTo(24, -62, 28, -48, -4, -36);
+            c.closePath();
+          }, {
+            shadowOffset: { x: 2, y: 4 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#4f7347',
+            pattern: grainPattern,
+            bevelStroke: '#9ac18e',
+            bevelWidth: 1.8,
+            creviceStroke: '#1d3322'
+          });
+
+          ctx.save();
+          ctx.strokeStyle = '#33522d';
+          ctx.lineWidth = 1.0;
+          ctx.beginPath();
+          ctx.moveTo(-4, -38);
+          ctx.lineTo(-4, -64);
+          ctx.moveTo(-4, -50);
+          ctx.lineTo(-20, -56);
+          ctx.moveTo(-4, -50);
+          ctx.lineTo(14, -56);
+          ctx.stroke();
+          ctx.restore();
+
+          if (Math.sin(t * 0.006 * speedMult) > 0.92) {
+            addSplash(this.x + (this.facingRight ? 10 : -10), this.y - 70, 2, 0.9);
+          }
+          ctx.restore();
+
+          ctx.restore();
+        }
+      };
+
+      const bearActor = {
+        id: 'bear',
+        x: 620,
+        y: 420,
+        footprintRadius: 14,
+        headingAngle: Math.PI * 0.95,
+        speed: 0.42,
+        turnTimer: 140,
+        walkCycle: 0,
+        facingRight: false,
+        update() {
+          this.turnTimer--;
+          if (this.turnTimer <= 0) {
+            this.turnTimer = 100 + Math.floor(Math.random() * 100);
+            this.headingAngle += (Math.random() - 0.5) * 0.7;
+          }
+
+          const vx = Math.cos(this.headingAngle) * this.speed * speedMult;
+          const vy = Math.sin(this.headingAngle) * (this.speed * 0.35) * speedMult;
+
+          const res = attemptMove(this, vx, vy);
+          if (!res.moved) {
+            this.headingAngle += Math.PI * 0.75;
+          } else {
+            this.walkCycle += 0.045 * speedMult;
+          }
+
+          if (Math.abs(vx) > 0.04) {
+            this.facingRight = (vx > 0);
+          }
+        },
+        render(ctx) {
+          const theme = themes[timeMode];
+          const waddleSway = Math.sin(this.walkCycle) * 2.5;
+
+          ctx.save();
+          ctx.translate(this.x, this.y);
+          if (!this.facingRight) ctx.scale(-1, 1);
+
+          ctx.save();
+          ctx.fillStyle = theme.ambientShadow;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 22, 6, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+
+          const bootSwing = Math.sin(this.walkCycle) * 5;
+          drawMultiPassShape(ctx, (c) => {
+            c.rect(-12, -10, 8, 10 + bootSwing);
+            c.rect(2, -10, 8, 10 - bootSwing);
+          }, {
+            shadowOffset: { x: 1, y: 2 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#b48a3e',
+            pattern: grainPattern,
+            bevelStroke: '#f2dc98',
+            bevelWidth: 1.2
+          });
+
+          drawMultiPassShape(ctx, (c) => {
+            c.moveTo(-16, -28);
+            c.lineTo(-20 + waddleSway, -6);
+            c.lineTo(18 + waddleSway, -6);
+            c.lineTo(14, -28);
+            c.closePath();
+          }, {
+            shadowOffset: { x: 2, y: 4 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#c59a43',
+            pattern: grainPattern,
+            bevelStroke: '#f6e4a8',
+            bevelWidth: 2.0,
+            creviceStroke: '#49371f'
+          });
+
+          ctx.save();
+          ctx.strokeStyle = '#543d22';
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(waddleSway * 0.5, -28);
+          ctx.lineTo(waddleSway * 0.5, -6);
+          ctx.stroke();
+          ctx.fillStyle = '#392a18';
+          ctx.beginPath();
+          ctx.arc(waddleSway * 0.5, -20, 1.5, 0, Math.PI * 2);
+          ctx.arc(waddleSway * 0.5, -14, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+
+          drawMultiPassShape(ctx, (c) => {
+            c.arc(0, -36, 14, 0, Math.PI * 2);
+          }, {
+            shadowOffset: { x: 2, y: 3 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#c59a43',
+            pattern: grainPattern,
+            bevelStroke: '#f6e4a8',
+            bevelWidth: 1.8,
+            creviceStroke: '#49371f'
+          });
+
+          drawMultiPassShape(ctx, (c) => {
+            c.ellipse(2, -36, 9, 8, 0, 0, Math.PI * 2);
+          }, {
+            shadowOffset: { x: 1, y: 1 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#533c30',
+            pattern: grainPattern,
+            bevelStroke: '#8e6b57',
+            bevelWidth: 1.0
+          });
+
+          drawMultiPassShape(ctx, (c) => {
+            c.arc(-11, -47, 4.5, 0, Math.PI * 2);
+            c.arc(9, -47, 4.5, 0, Math.PI * 2);
+          }, {
+            shadowOffset: { x: 1, y: 1 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#c59a43',
+            pattern: grainPattern,
+            bevelStroke: '#f6e4a8',
+            bevelWidth: 1.0
+          });
+
+          ctx.save();
+          ctx.fillStyle = '#d2beaa';
+          ctx.beginPath();
+          ctx.ellipse(5, -34, 4.5, 3.5, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#221b18';
+          ctx.beginPath();
+          ctx.arc(7, -35, 1.6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#1c1512';
+          ctx.beginPath();
+          ctx.arc(3, -38, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#f8f8f8';
+          ctx.beginPath();
+          ctx.arc(2.5, -38.5, 0.6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+
+          ctx.restore();
+        }
+      };
+
+      const frogActor = {
+        id: 'frog',
+        x: 340,
+        y: 395,
+        footprintRadius: 8,
+        jumpProgress: 0,
+        isJumping: false,
+        jumpTimer: 160,
+        startX: 340,
+        startY: 395,
+        targetX: 380,
+        targetY: 395,
+        update() {
+          this.jumpTimer -= 1 * speedMult;
+          if (this.jumpTimer <= 0 && !this.isJumping) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 30 + Math.random() * 25;
+            const candX = this.x + Math.cos(angle) * dist;
+            const candY = this.y + Math.sin(angle) * (dist * 0.4);
+
+            if (isWalkable(candX, candY, this.footprintRadius, this)) {
+              this.isJumping = true;
+              this.jumpProgress = 0;
+              this.startX = this.x;
+              this.startY = this.y;
+              this.targetX = candX;
+              this.targetY = candY;
+            } else {
+              this.jumpTimer = 30;
+            }
+          }
+
+          if (this.isJumping) {
+            this.jumpProgress += 0.022 * speedMult;
+            const p = Math.min(1.0, this.jumpProgress);
+            this.x = this.startX + (this.targetX - this.startX) * p;
+            this.y = this.startY + (this.targetY - this.startY) * p;
+
+            if (p >= 1.0) {
+              this.isJumping = false;
+              this.jumpTimer = 140 + Math.floor(Math.random() * 100);
+              this.x = this.targetX;
+              this.y = this.targetY;
+              addSplash(this.x, this.y, 3, 1.0);
+            }
+          }
+        },
+        render(ctx) {
+          const theme = themes[timeMode];
+          const p = Math.min(1.0, this.jumpProgress);
+          const jumpOffsetY = this.isJumping ? -45 * 4 * p * (1 - p) : 0;
+          let squashX = 1.0;
+          let squashY = 1.0;
+
+          if (this.isJumping) {
+            if (p < 0.2 || p > 0.8) {
+              squashX = 1.25;
+              squashY = 0.8;
+            } else {
+              squashX = 0.85;
+              squashY = 1.2;
+            }
+          }
+
+          ctx.save();
+          ctx.translate(this.x, this.y);
+
+          ctx.save();
+          const shadowAlpha = Math.max(0.15, 0.65 - Math.abs(jumpOffsetY) * 0.012);
+          ctx.fillStyle = `rgba(20, 28, 42, ${shadowAlpha})`;
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 12, 4, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+
+          ctx.translate(0, jumpOffsetY);
+          ctx.scale(squashX, squashY);
+
+          drawMultiPassShape(ctx, (c) => {
+            c.ellipse(-7, -2, 5, 3, -0.2, 0, Math.PI * 2);
+            c.ellipse(7, -2, 5, 3, 0.2, 0, Math.PI * 2);
+          }, {
+            shadowOffset: { x: 1, y: 1 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#4f7243',
+            pattern: grainPattern,
+            bevelStroke: '#97bf87',
+            bevelWidth: 1.0
+          });
+
+          drawMultiPassShape(ctx, (c) => {
+            c.ellipse(0, -7, 11, 8, 0, 0, Math.PI * 2);
+          }, {
+            shadowOffset: { x: 1, y: 2 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#5a824e',
+            pattern: grainPattern,
+            bevelStroke: '#a8d297',
+            bevelWidth: 1.5,
+            creviceStroke: '#203920'
+          });
+
+          ctx.save();
+          ctx.fillStyle = '#395332';
+          ctx.beginPath();
+          ctx.arc(-3, -6, 1.5, 0, Math.PI * 2);
+          ctx.arc(3, -8, 1.8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+
+          drawMultiPassShape(ctx, (c) => {
+            c.arc(-5, -14, 4, 0, Math.PI * 2);
+            c.arc(5, -14, 4, 0, Math.PI * 2);
+          }, {
+            shadowOffset: { x: 1, y: 1 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#5a824e',
+            pattern: grainPattern,
+            bevelStroke: '#a8d297',
+            bevelWidth: 1.2
+          });
+
+          ctx.save();
+          ctx.fillStyle = '#1c241c';
+          ctx.beginPath();
+          ctx.arc(-5, -14, 2, 0, Math.PI * 2);
+          ctx.arc(5, -14, 2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#f5f5f5';
+          ctx.beginPath();
+          ctx.arc(-5.8, -14.8, 0.8, 0, Math.PI * 2);
+          ctx.arc(4.2, -14.8, 0.8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+
+          drawMultiPassShape(ctx, (c) => {
+            c.moveTo(0, -17);
+            c.lineTo(-5, -24);
+            c.bezierCurveTo(-2, -26, 2, -26, 5, -24);
+            c.closePath();
+          }, {
+            shadowOffset: { x: 1, y: 1 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#5c6fa8',
+            pattern: grainPattern,
+            bevelStroke: '#b8c4ea',
+            bevelWidth: 1.0
+          });
+
+          ctx.restore();
+        }
+      };
+
+      const duckActor = {
+        id: 'duck',
+        x: 490,
+        y: 368,
+        footprintRadius: 9,
+        isSwimmer: true,
+        headingAngle: 0.2,
+        speed: 0.35,
+        turnTimer: 100,
+        swimPhase: 0,
+        headBob: 0,
+        facingRight: true,
+        update() {
+          this.turnTimer--;
+          if (this.turnTimer <= 0) {
+            this.turnTimer = 80 + Math.floor(Math.random() * 80);
+            this.headingAngle += (Math.random() - 0.5) * 1.0;
+          }
+
+          const vx = Math.cos(this.headingAngle) * this.speed * speedMult;
+          const vy = Math.sin(this.headingAngle) * (this.speed * 0.45) * speedMult;
+
+          const res = attemptMove(this, vx, vy);
+          if (!res.moved) {
+            this.headingAngle += Math.PI * 0.7;
+          } else {
+            this.swimPhase += 0.04 * speedMult;
+          }
+
+          if (Math.abs(vx) > 0.03) {
+            this.facingRight = (vx > 0);
+          }
+        },
+        render(ctx) {
+          const theme = themes[timeMode];
+          this.headBob = Math.sin(this.swimPhase * 2) * 1.2;
+
+          ctx.save();
+          ctx.translate(this.x, this.y);
+          if (!this.facingRight) ctx.scale(-1, 1);
+
+          ctx.save();
+          ctx.strokeStyle = 'rgba(164, 188, 206, 0.45)';
+          ctx.lineWidth = 1.0;
+          ctx.beginPath();
+          ctx.ellipse(-4, 0, 14, 5, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+
+          drawMultiPassShape(ctx, (c) => {
+            c.ellipse(0, -4, 11, 7, 0.05, 0, Math.PI * 2);
+          }, {
+            shadowOffset: { x: 1, y: 2 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#d9ba5f',
+            pattern: grainPattern,
+            bevelStroke: '#fae7a5',
+            bevelWidth: 1.4,
+            creviceStroke: '#483c21'
+          });
+
+          drawMultiPassShape(ctx, (c) => {
+            c.ellipse(-2, -5, 6, 4, 0.2, 0, Math.PI * 2);
+          }, {
+            shadowOffset: { x: 1, y: 1 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#caa74f',
+            pattern: grainPattern,
+            bevelStroke: '#fae7a5',
+            bevelWidth: 1.0
+          });
+
+          drawMultiPassShape(ctx, (c) => {
+            c.arc(8, -12 + this.headBob, 6, 0, Math.PI * 2);
+          }, {
+            shadowOffset: { x: 1, y: 1 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#d9ba5f',
+            pattern: grainPattern,
+            bevelStroke: '#fae7a5',
+            bevelWidth: 1.2
+          });
+
+          drawMultiPassShape(ctx, (c) => {
+            c.moveTo(13, -11 + this.headBob);
+            c.lineTo(19, -9 + this.headBob);
+            c.lineTo(13, -8 + this.headBob);
+            c.closePath();
+          }, {
+            shadowOffset: { x: 1, y: 1 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#c77843',
+            pattern: grainPattern,
+            bevelStroke: '#f4b082',
+            bevelWidth: 1.0
+          });
+
+          ctx.save();
+          ctx.fillStyle = '#221c17';
+          ctx.beginPath();
+          ctx.arc(9, -13 + this.headBob, 1.2, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(8.6, -13.4 + this.headBob, 0.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+
+          ctx.restore();
+        }
+      };
+
+      function drawSceneryBackdrop(t) {
+        const theme = themes[timeMode];
+
+        const skyGrad = ctx.createLinearGradient(0, 0, 0, 260);
+        skyGrad.addColorStop(0, theme.skyTop);
+        skyGrad.addColorStop(0.65, theme.skyBottom);
+        skyGrad.addColorStop(1, '#8293a6');
+        ctx.fillStyle = skyGrad;
+        ctx.fillRect(0, 0, 800, 460);
+
+        ctx.save();
+        ctx.fillStyle = grainPattern;
+        ctx.globalAlpha = 0.35;
+        ctx.fillRect(0, 0, 800, 260);
+        ctx.restore();
+
+        ctx.save();
+        const lightGrad = ctx.createRadialGradient(160, 40, 10, 220, 180, 420);
+        lightGrad.addColorStop(0, theme.keyLightColor);
+        lightGrad.addColorStop(0.5, 'rgba(210, 225, 230, 0.08)');
+        lightGrad.addColorStop(1, 'rgba(30, 40, 56, 0)');
+        ctx.fillStyle = lightGrad;
+        ctx.fillRect(0, 0, 800, 460);
+        ctx.restore();
+
+        drawMultiPassShape(ctx, (c) => {
+          c.moveTo(0, 180);
+          c.bezierCurveTo(120, 150, 230, 160, 360, 190);
+          c.bezierCurveTo(480, 215, 620, 165, 800, 185);
+          c.lineTo(800, 260);
+          c.lineTo(0, 260);
+          c.closePath();
+        }, {
+          shadowOffset: { x: 0, y: 4 },
+          shadowColor: 'rgba(25, 34, 48, 0.4)',
+          fillColor: '#4f5e71',
+          pattern: stonePattern,
+          bevelStroke: 'rgba(182, 198, 212, 0.25)',
+          bevelWidth: 1.2
+        });
+
+        drawMultiPassShape(ctx, (c) => {
+          c.moveTo(0, 230);
+          c.bezierCurveTo(180, 210, 310, 245, 500, 220);
+          c.bezierCurveTo(640, 205, 720, 235, 800, 225);
+          c.lineTo(800, 310);
+          c.lineTo(0, 310);
+          c.closePath();
+        }, {
+          shadowOffset: { x: 2, y: 5 },
+          shadowColor: theme.ambientShadow,
+          fillColor: '#364d42',
+          pattern: grainPattern,
+          bevelStroke: 'rgba(146, 173, 148, 0.35)',
+          bevelWidth: 1.5
+        });
+
+        const gust = Math.sin(t * speedMult * 0.0004) * 0.025;
+        ctx.save();
+        ctx.translate(290, 295);
+        ctx.strokeStyle = '#433430';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.quadraticCurveTo(gust * 50, -35, gust * 90, -70);
+        ctx.stroke();
+
+        drawMultiPassShape(ctx, (c) => {
+          c.arc(gust * 90, -75, 18, 0, Math.PI * 2);
+        }, {
+          shadowOffset: { x: 1, y: 2 },
+          shadowColor: theme.ambientShadow,
+          fillColor: '#436149',
+          pattern: grainPattern,
+          bevelStroke: theme.grassHighlight,
+          bevelWidth: 1.2
+        });
+        ctx.restore();
+
+        drawMultiPassShape(ctx, (c) => {
+          c.moveTo(0, 290);
+          c.bezierCurveTo(190, 280, 340, 305, 520, 285);
+          c.bezierCurveTo(660, 275, 740, 295, 800, 288);
+          c.lineTo(800, 460);
+          c.lineTo(0, 460);
+          c.closePath();
+        }, {
+          shadowOffset: { x: 0, y: 6 },
+          shadowColor: theme.ambientShadow,
+          fillColor: theme.grassBase,
+          pattern: grainPattern,
+          bevelStroke: theme.grassHighlight,
+          bevelWidth: 2.0
+        });
+
+        ctx.save();
+        ctx.strokeStyle = theme.grassCrevice;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(0, 335);
+        ctx.bezierCurveTo(220, 330, 420, 345, 800, 330);
+        ctx.moveTo(0, 410);
+        ctx.bezierCurveTo(310, 415, 540, 395, 800, 415);
+        ctx.stroke();
+        ctx.restore();
+
+        const pathStones = [
+          { x: 90, y: 355, w: 26, h: 12 },
+          { x: 145, y: 368, w: 30, h: 14 },
+          { x: 195, y: 358, w: 22, h: 11 },
+          { x: 290, y: 365, w: 28, h: 13 },
+          { x: 675, y: 370, w: 28, h: 14 },
+          { x: 740, y: 375, w: 32, h: 15 }
+        ];
+
+        pathStones.forEach(st => {
+          drawMultiPassShape(ctx, (c) => {
+            c.ellipse(st.x, st.y, st.w * 0.5, st.h * 0.5, 0.05, 0, Math.PI * 2);
+          }, {
+            shadowOffset: { x: 2, y: 3 },
+            shadowColor: theme.ambientShadow,
+            fillColor: '#5a6775',
+            pattern: stonePattern,
+            bevelStroke: '#97aab9',
+            bevelWidth: 1.2,
+            creviceStroke: '#2a323c'
+          });
+        });
+
+        const pond = collisionRegistry.find(o => o.id === 'pond_water');
+        ctx.save();
+        ctx.fillStyle = theme.grassCrevice;
+        ctx.beginPath();
+        ctx.ellipse(pond.x, pond.y + 3, pond.rx + 4, pond.ry + 4, 0.02, 0, Math.PI * 2);
+        ctx.fill();
+
+        const waterGrad = ctx.createLinearGradient(pond.x - pond.rx, pond.y - pond.ry, pond.x + pond.rx, pond.y + pond.ry);
+        waterGrad.addColorStop(0, theme.puddleReflect);
+        waterGrad.addColorStop(0.45, theme.puddleBase);
+        waterGrad.addColorStop(1, '#232c39');
+        ctx.fillStyle = waterGrad;
+        ctx.beginPath();
+        ctx.ellipse(pond.x, pond.y, pond.rx, pond.ry, 0.02, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.globalCompositeOperation = 'source-atop';
+        ctx.fillStyle = grainPattern;
+        ctx.globalAlpha = 0.25;
+        ctx.fill();
+
+        floatingLeaves.forEach(leaf => {
+          const wobble = Math.sin(t * 0.0015 * speedMult + leaf.phase) * 0.15;
+          ctx.save();
+          ctx.translate(leaf.x, leaf.y);
+          ctx.rotate(leaf.rot + wobble);
+          ctx.fillStyle = '#697a4e';
+          ctx.beginPath();
+          ctx.ellipse(0, 0, leaf.size, leaf.size * 0.5, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#435031';
+          ctx.lineWidth = 0.8;
+          ctx.beginPath();
+          ctx.moveTo(-leaf.size, 0);
+          ctx.lineTo(leaf.size, 0);
+          ctx.stroke();
+          ctx.restore();
+        });
+
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.strokeStyle = 'rgba(180, 204, 218, 0.45)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.ellipse(pond.x, pond.y, pond.rx, pond.ry, 0.02, Math.PI * 0.8, Math.PI * 2.0);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      function updateAndDrawRain() {
+        const theme = themes[timeMode];
+
+        for (let i = splashes.length - 1; i >= 0; i--) {
+          const sp = splashes[i];
+          sp.x += sp.vx;
+          sp.y += sp.vy;
+          sp.vy += 0.09 * speedMult;
+          sp.life -= sp.decay;
+
+          if (sp.life <= 0) {
+            splashes.splice(i, 1);
+            continue;
+          }
+
+          ctx.fillStyle = `rgba(182, 204, 222, ${sp.life * 0.8})`;
+          ctx.beginPath();
+          ctx.arc(sp.x, sp.y, sp.radius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        for (let i = ripples.length - 1; i >= 0; i--) {
+          const rp = ripples[i];
+          rp.r += rp.speed;
+          rp.alpha -= 0.011 * speedMult;
+
+          if (rp.alpha <= 0 || rp.r >= rp.maxR) {
+            ripples.splice(i, 1);
+            continue;
+          }
+
+          ctx.strokeStyle = `rgba(175, 200, 220, ${rp.alpha * 0.6})`;
+          ctx.lineWidth = 1.0;
+          ctx.beginPath();
+          ctx.ellipse(rp.x, rp.y, rp.r, rp.r * 0.35, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
+        ctx.save();
+        ctx.lineCap = 'round';
+
+        rainDrops.forEach(drop => {
+          drop.x += drop.slant * speedMult;
+          drop.y += drop.baseSpeed * speedMult;
+
+          const groundY = 280 + (drop.x / 800) * 110 + (Math.sin(drop.x * 0.02) * 15);
+
+          if (drop.y >= groundY) {
+            if (Math.random() < 0.22) {
+              addSplash(drop.x, drop.y, 2, 0.8);
+            }
+            drop.y = -20 - Math.random() * 40;
+            drop.x = Math.random() * 880 - 40;
+          }
+
+          const alpha = 0.25 + drop.layer * 0.45;
+          ctx.strokeStyle = `rgba(195, 214, 230, ${alpha})`;
+          ctx.lineWidth = drop.thickness;
+
+          ctx.beginPath();
+          ctx.moveTo(drop.x, drop.y);
+          ctx.lineTo(drop.x + drop.slant * (drop.len * 0.15), drop.y + drop.len);
+          ctx.stroke();
+        });
+
+        ctx.restore();
+
+        ctx.save();
+        ctx.fillStyle = theme.mistColor;
+        ctx.fillRect(0, 260, 800, 80);
+        ctx.restore();
+      }
+
+      function tick(currentTime) {
+        if (isPaused) return;
+
+        lastTime = currentTime;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        drawSceneryBackdrop(currentTime);
+
+        catActor.update();
+        bearActor.update();
+        frogActor.update();
+        duckActor.update();
+
+        const ySortedEntities = [
+          ancientTreeProp,
+          slenderTreeProp,
+          boulder1Prop,
+          boulder2Prop,
+          catActor,
+          bearActor,
+          frogActor,
+          duckActor
+        ];
+
+        ySortedEntities.sort((a, b) => a.y - b.y);
+
+        ySortedEntities.forEach(entity => {
+          entity.render(ctx, currentTime);
+        });
+
+        updateAndDrawRain();
+
+        animId = requestAnimationFrame(tick);
+      }
+
+      function startAnimation() {
+        if (!animId) {
+          lastTime = performance.now();
+          animId = requestAnimationFrame(tick);
+        }
+      }
+
+      function stopAnimation() {
+        if (animId) {
+          cancelAnimationFrame(animId);
+          animId = null;
+        }
+      }
+
+      if (container) {
+        container.addEventListener('contentvisibilityautostatechange', (event) => {
+          if (event.skipped) {
+            stopAnimation();
+          } else if (!isPaused) {
+            startAnimation();
+          }
+        });
+      }
+
+      if (!('contentVisibility' in document.documentElement.style)) {
+        const observer = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting && !isPaused) {
+              startAnimation();
+            } else {
+              stopAnimation();
+            }
+          });
+        }, { rootMargin: '150px' });
+        observer.observe(container || canvas);
+      }
+
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+          stopAnimation();
+        } else if (!isPaused) {
+          startAnimation();
+        }
+      });
+
+      canvas.addEventListener('pointerdown', (e) => {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        const x = (e.clientX - rect.left) * scaleX;
+        const y = (e.clientY - rect.top) * scaleY;
+        addSplash(x, y, 6, 2.2);
+
+        if (!audioCtx && soundEnabled) {
+          initAuthenticRainAudio();
+        }
+      });
+
+      document.getElementById('btn-sound').addEventListener('click', toggleSound);
+
+      const btnPace = document.getElementById('btn-pace');
+      const labelPace = document.getElementById('label-pace');
+      btnPace.addEventListener('click', () => {
+        paceIndex = (paceIndex + 1) % paceSettings.length;
+        speedMult = paceSettings[paceIndex].mult;
+        labelPace.textContent = paceSettings[paceIndex].label;
+      });
+
+      const btnIntensity = document.getElementById('btn-intensity');
+      const labelIntensity = document.getElementById('label-intensity');
+      const intensityLabels = ['Drizzle', 'Steady', 'Downpour'];
+      btnIntensity.addEventListener('click', () => {
+        rainIntensityMode = (rainIntensityMode + 1) % 3;
+        labelIntensity.textContent = intensityLabels[rainIntensityMode];
+        initRain();
+      });
+
+      const btnTime = document.getElementById('btn-time');
+      const labelTime = document.getElementById('label-time');
+      btnTime.addEventListener('click', () => {
+        timeMode = (timeMode + 1) % themes.length;
+        labelTime.textContent = themes[timeMode].name;
+      });
+
+      const btnPause = document.getElementById('btn-pause');
+      const labelPause = document.getElementById('label-pause');
+      btnPause.addEventListener('click', () => {
+        isPaused = !isPaused;
+        labelPause.textContent = isPaused ? 'Resume' : 'Pause';
+        if (isPaused) {
+          stopAnimation();
+        } else {
+          startAnimation();
+        }
+      });
+
+      initRain();
+      startAnimation();
+    })();
+  </script>
+</body>
+</html>
