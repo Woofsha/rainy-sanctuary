@@ -27,6 +27,9 @@
       -webkit-user-select: none;
       touch-action: manipulation;
     }
+    input[type=range] {
+      accent-color: #06b6d4;
+    }
   </style>
 </head>
 <body class="bg-[#0b0f17] text-[#d1d9e6] antialiased p-2 sm:p-4 min-h-screen flex items-center justify-center">
@@ -42,11 +45,16 @@
       </div>
 
       <div class="flex items-center flex-wrap gap-2 text-xs">
-        <!-- Rain Sound Toggle -->
-        <button id="btn-sound" class="px-3 py-1.5 rounded-lg border border-[#2b374c] bg-[#1a2332] hover:bg-[#232e42] transition-colors font-medium flex items-center gap-1.5 text-[#e2e8f0]">
-          <span id="icon-sound">🌧️</span>
-          <span>Rain Sound: <span id="label-sound" class="text-rose-400 font-semibold">Off</span></span>
-        </button>
+        <!-- Rain Sound & Volume Slider Group -->
+        <div class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-[#2b374c] bg-[#1a2332]">
+          <button id="btn-sound" class="font-medium flex items-center gap-1.5 text-[#e2e8f0] hover:text-cyan-400 transition-colors">
+            <span id="icon-sound">🌧️</span>
+            <span>Rain: <span id="label-sound" class="text-rose-400 font-semibold">Off</span></span>
+          </button>
+          <div class="h-3 w-[1px] bg-[#2b374c]"></div>
+          <label for="slider-vol" class="text-[11px] text-[#8fa0b5] select-none">Vol</label>
+          <input id="slider-vol" type="range" min="0" max="1" step="0.01" value="0.3" class="w-16 sm:w-20 cursor-pointer h-1.5 bg-[#253247] rounded-lg" title="Rain Volume">
+        </div>
 
         <!-- Pace Toggle (1.0x -> 0.5x -> 0.35x) -->
         <button id="btn-pace" class="px-3 py-1.5 rounded-lg border border-[#2b374c] bg-[#1a2332] hover:bg-[#232e42] transition-colors font-medium text-[#e2e8f0]">
@@ -324,6 +332,9 @@
       let rainShowerSource = null;
       let rainPatterSource = null;
 
+      const sliderVol = document.getElementById('slider-vol');
+      let userVolume = parseFloat(sliderVol.value);
+
       function initAuthenticRainAudio() {
         if (audioCtx) return;
 
@@ -408,6 +419,19 @@
         rainPatterSource.start();
       }
 
+      const FULL_RAIN_GAIN = 0.48;
+
+      function updateVolume(val) {
+        userVolume = val;
+        if (masterRainGain && audioCtx) {
+          if (soundEnabled && userVolume > 0) {
+            masterRainGain.gain.setTargetAtTime(userVolume * FULL_RAIN_GAIN, audioCtx.currentTime, 0.05);
+          } else {
+            masterRainGain.gain.setTargetAtTime(0.0001, audioCtx.currentTime, 0.05);
+          }
+        }
+      }
+
       function toggleSound() {
         if (!audioCtx) {
           initAuthenticRainAudio();
@@ -421,7 +445,11 @@
         const iconSound = document.getElementById('icon-sound');
 
         if (soundEnabled) {
-          masterRainGain.gain.setTargetAtTime(0.48, audioCtx.currentTime, 0.3);
+          if (userVolume === 0) {
+            userVolume = 0.3;
+            sliderVol.value = 0.3;
+          }
+          masterRainGain.gain.setTargetAtTime(userVolume * FULL_RAIN_GAIN, audioCtx.currentTime, 0.3);
           labelSound.textContent = 'Cozy Rain';
           labelSound.className = 'text-emerald-400 font-semibold';
           iconSound.textContent = '🌧️✨';
@@ -432,6 +460,32 @@
           iconSound.textContent = '🌧️';
         }
       }
+
+      sliderVol.addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value);
+        if (!audioCtx && val > 0) {
+          initAuthenticRainAudio();
+          soundEnabled = true;
+          document.getElementById('label-sound').textContent = 'Cozy Rain';
+          document.getElementById('label-sound').className = 'text-emerald-400 font-semibold';
+          document.getElementById('icon-sound').textContent = '🌧️✨';
+        } else if (!soundEnabled && val > 0) {
+          soundEnabled = true;
+          if (audioCtx.state === 'suspended') audioCtx.resume();
+          document.getElementById('label-sound').textContent = 'Cozy Rain';
+          document.getElementById('label-sound').className = 'text-emerald-400 font-semibold';
+          document.getElementById('icon-sound').textContent = '🌧️✨';
+        }
+
+        if (val === 0) {
+          document.getElementById('label-sound').textContent = 'Muted';
+          document.getElementById('label-sound').className = 'text-rose-400 font-semibold';
+        } else if (soundEnabled) {
+          document.getElementById('label-sound').textContent = 'Cozy Rain';
+          document.getElementById('label-sound').className = 'text-emerald-400 font-semibold';
+        }
+        updateVolume(val);
+      });
 
       // --- PARTICLES & WEATHER ---
       const rainDrops = [];
@@ -1661,6 +1715,7 @@
         ctx.restore();
       }
 
+      // --- MAIN ANIMATION & DEPTH SORT LOOP ---
       function tick(currentTime) {
         if (isPaused) return;
 
